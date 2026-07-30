@@ -1,0 +1,15 @@
+# 가상환경
+.venv/
+
+# 파이썬 캐시
+__pycache__/
+*.py[cod]
+
+# 로컬 작업 데이터 (앱이 실행될 때 자동 생성됨)
+projects/
+outputs/
+temp/
+bin/
+
+# Streamlit 로컬 설정
+.streamlit/

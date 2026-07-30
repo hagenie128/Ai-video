@@ -1,0 +1,52 @@
+{
+  "id": "dark_warning",
+  "label": "dark_warning (경고형 다크톤)",
+  "description": "세로 9:16 / 하드컷 / 채도 감소 + 대비 증가 + 약한 필름 그레인 / BGM 자동 덕킹 / 흰색 굵은 자막",
+  "width": 1080,
+  "height": 1920,
+  "fps": 30,
+  "cut_rules": {
+    "first": 1.5,
+    "normal": 2.0,
+    "detail": 1.0,
+    "first_range": [1.2, 1.8],
+    "normal_range": [1.5, 2.5],
+    "detail_range": [0.7, 1.2]
+  },
+  "default_image_effect": "slow_zoom_in",
+  "image_effect_cycle": ["slow_zoom_in", "pan_left_to_right", "fast_zoom_in", "pan_right_to_left"],
+  "default_video_effect": "none",
+  "transition": "hardcut",
+  "video": {
+    "saturation": 0.72,
+    "contrast": 1.18,
+    "brightness": -0.02,
+    "grain": 8
+  },
+  "subtitle": {
+    "mode": "cut",
+    "font": "Malgun Gothic",
+    "font_size": 74,
+    "max_chars": 14,
+    "bold": true,
+    "primary_color": "#FFFFFF",
+    "outline_color": "#000000",
+    "outline": 6,
+    "shadow": 2,
+    "margin_v": 300,
+    "align": "center"
+  },
+  "audio": {
+    "voice_volume": 1.0,
+    "bgm_volume": 0.22,
+    "sfx_volume": 0.7,
+    "ducking": true,
+    "duck_threshold": 0.045,
+    "duck_ratio": 9.0,
+    "duck_attack": 15.0,
+    "duck_release": 380.0,
+    "fade_in": 0.3,
+    "fade_out": 0.6,
+    "black_tail": 0.8
+  }
+}
