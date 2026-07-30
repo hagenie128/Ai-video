@@ -14,6 +14,7 @@ import renderer
 import timeline as tl
 import ui_ai_settings
 import ui_auto
+import ui_review
 from audio import describe as audio_describe
 from renderer import RenderError
 from subtitles import split_script
@@ -42,6 +43,8 @@ PAGES = [
     "6. 오디오 설정",
     "7. 출력",
     "8. AI 연동 설정",
+    "9. 결과 검수",
+    "10. 사용량 통계",
 ]
 
 
@@ -776,6 +779,9 @@ def main() -> None:
         if page == PAGES[8]:                       # AI 연동 설정은 프로젝트 없이도 열 수 있다
             ui_ai_settings.page(None)
             return
+        if page == PAGES[10]:                      # 사용량 통계도 프로젝트 없이 볼 수 있다
+            ui_review.page_stats(None)
+            return
         st.title("AI Shorts Maker")
         st.write("왼쪽 사이드바에서 새 프로젝트를 만들거나 기존 프로젝트를 여세요.")
         st.markdown(
@@ -792,6 +798,13 @@ def main() -> None:
         return
     if page == PAGES[8]:
         ui_ai_settings.page(p)
+        return
+    if page == PAGES[9]:
+        ui_review.page_review(p)
+        autosave()
+        return
+    if page == PAGES[10]:
+        ui_review.page_stats(p)
         return
     {
         PAGES[1]: page_settings,

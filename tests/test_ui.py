@@ -89,6 +89,8 @@ PAGES = [
     "6. 오디오 설정",
     "7. 출력",
     "8. AI 연동 설정",
+    "9. 결과 검수",
+    "10. 사용량 통계",
 ]
 
 
@@ -104,6 +106,21 @@ def main() -> int:
     at = run_page("8. AI 연동 설정", None)
     check("프로젝트 없이 AI 설정 화면", not at.exception,
           "; ".join(str(e.value) for e in at.exception)[:300])
+    at = run_page("10. 사용량 통계", None)
+    check("프로젝트 없이 통계 화면", not at.exception,
+          "; ".join(str(e.value) for e in at.exception)[:300])
+
+    # 결과 검수 화면: 점검 실행 버튼이 실제로 동작하는지
+    at = run_page("9. 결과 검수", project)
+    target = next((b for b in at.button if "점검 실행" in b.label), None)
+    if target is None:
+        check("검수 점검 버튼", False, "버튼 없음")
+    else:
+        after = target.click().run()
+        check("검수 점검 버튼 동작", not after.exception,
+              "; ".join(str(e.value) for e in after.exception)[:300])
+        rows = after.session_state["_qc_pre"] if "_qc_pre" in after.session_state else []
+        check("점검 결과 표시", bool(rows), f"{len(rows)}개 항목")
 
     at = run_page("0. AI 자동 제작", project)
     labels = [b.label for b in at.button]

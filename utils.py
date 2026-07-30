@@ -109,8 +109,12 @@ def run_ffmpeg(
     cwd: Path | None = None,
     total_duration: float | None = None,
     progress_cb: Callable[[float], None] | None = None,
+    loglevel: str = "error",
 ) -> str:
-    """ffmpeg 실행. args 는 ffmpeg 실행 파일 뒤에 붙는 인자 목록."""
+    """ffmpeg 실행. args 는 ffmpeg 실행 파일 뒤에 붙는 인자 목록.
+
+    loglevel 을 'info' 로 올리면 volumedetect 같은 분석 필터 결과를 stderr 로 받을 수 있다.
+    """
     ffmpeg = find_ffmpeg()
     if not ffmpeg:
         raise RuntimeError(FFMPEG_INSTALL_HELP)
@@ -118,7 +122,7 @@ def run_ffmpeg(
     # -nostats: 진행 상태는 -progress 로만 받는다.
     # 진행 상태는 파이프가 아니라 작업 폴더의 파일로 받는다.
     # (stdout 파이프로 받으면 인코딩 도중 교착이 생길 수 있다.)
-    cmd = [ffmpeg, "-hide_banner", "-nostdin", "-nostats", "-loglevel", "error", "-y"]
+    cmd = [ffmpeg, "-hide_banner", "-nostdin", "-nostats", "-loglevel", loglevel, "-y"]
     use_progress = bool(progress_cb and total_duration and cwd)
     progress_file = Path(cwd) / "_progress.txt" if use_progress else None
     if progress_file is not None:
