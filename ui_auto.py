@@ -18,6 +18,7 @@ import scene_planner as sp
 import script_generator as sg
 import timeline as tl
 import tts_service
+import ui_higgsfield
 from utils import AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS
 
 SAFETY_NOTE = (
@@ -556,6 +557,8 @@ def page(project: dict, bump) -> None:
     section_analysis(project)
     st.divider()
     section_plan(project, brief)
+    st.divider()
+    ui_higgsfield.section(project)
     st.divider()
     section_draft(project)
 

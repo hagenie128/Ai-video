@@ -200,15 +200,30 @@ def page(project: dict | None = None) -> None:
             st.warning("로그인이 필요합니다. 아래 명령을 터미널에서 실행하세요 (브라우저 인증).")
             st.code("higgsfield auth login", language="text")
 
+        if env["cli"]:
+            surf = hf.surface()
+            st.caption(
+                f"앱이 사용할 생성 명령: `{' '.join(surf.root[-1:])} generate create <job_type> --prompt ...`"
+                + (f" `{surf.wait_flag}`" if surf.wait_flag else "")
+                + (f" `{surf.image_flag} <이미지>`" if surf.image_flag else "")
+                if surf.can_generate() else
+                "영상 생성 명령을 확인하지 못했습니다 → 수동 업로드 모드로 동작합니다."
+            )
+            if env.get("credits") is not None:
+                st.caption(f"계정 잔여 크레딧(실제 조회): {env['credits']:.1f}")
+
         with st.expander("CLI 실제 명령 목록 (help 출력)"):
-            if st.button("help 출력 보기", key="hf_help"):
+            c1, c2 = st.columns(2)
+            if c1.button("help 출력 보기", key="hf_help"):
                 st.session_state["_hf_help"] = hf.help_text()
+            if c2.button("generate create help 보기", key="hf_help_create"):
+                st.session_state["_hf_help"] = hf.help_text("generate create")
             help_text = st.session_state.get("_hf_help")
             if help_text:
                 st.code(help_text[:6000], language="text")
             else:
                 st.caption("버튼을 누르면 설치된 CLI 의 실제 help 출력을 그대로 보여줍니다. "
-                           "앱은 이 출력에서 확인된 명령만 사용합니다.")
+                           "앱은 이 출력에서 확인된 명령과 옵션만 사용합니다 (문법을 추측하지 않습니다).")
 
         with st.expander("모델 목록 조회"):
             if st.button("모델 조회", key="hf_models"):

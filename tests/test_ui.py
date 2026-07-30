@@ -127,6 +127,27 @@ def main() -> int:
     check("장면 계획 저장됨", bool(project.get("scene_plan")),
           f"{len(project.get('scene_plan') or [])}개")
 
+    # Higgsfield 섹션: AI 장면이 있을 때 승인/대체/수동 업로드 UI 가 나오는지
+    import scene_planner as sp_mod
+    ai_scenes = sp_mod.ai_items(project.get("scene_plan") or [])
+    check("AI 장면이 계획에 있음", bool(ai_scenes), f"{len(ai_scenes)}개")
+    if ai_scenes:
+        at = run_page("0. AI 자동 제작", project)
+        texts = [str(getattr(el, "value", "")) for el in at.subheader] + \
+                [str(getattr(el, "value", "")) for el in at.markdown]
+        labels = [b.label for b in at.button]
+        check("Higgsfield 섹션 표시", any("Higgsfield AI 영상" in t for t in texts),
+              str([t for t in texts if "Higgsfield" in t])[:80])
+        check("프롬프트 편집 영역 존재", any(k.startswith("hfp_") for k in
+                                    [t.key or "" for t in at.text_area]),
+              str([t.key for t in at.text_area][:6]))
+        check("사진 대체 버튼 존재", any("사진으로 대체" in label for label in labels))
+        target = next((b for b in at.button if "남은 장면을 실제 사진으로 대체" in b.label), None)
+        if target is not None:
+            after = target.click().run()
+            check("사진 대체 버튼 동작", not after.exception,
+                  "; ".join(str(e.value) for e in after.exception)[:300])
+
     # 타임라인 화면: 계획이 있는 상태에서 초안 구성 버튼 동작
     at = run_page("4. 타임라인", project)
     check("타임라인 상단 요약 표시", len(at.metric) >= 5, f"{len(at.metric)}개")

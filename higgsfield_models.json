@@ -1,32 +1,32 @@
 {
-  "_note": "모델 선택 규칙과 예상 크레딧은 여기서만 바꾼다. 앱은 CLI 가 실제로 조회해 준 모델 목록과 이 파일을 대조해 사용 가능한 모델만 고른다. 크레딧 값은 예산 관리용 추정치이므로 Higgsfield 요금 정책에 맞춰 직접 수정해야 한다.",
-  "fallback_model": "kling-3.0",
+  "_note": "모델 선택 규칙과 예상 크레딧은 이 파일에서만 바꾼다. 앱은 `higgsfield model list --video` 로 실제 조회한 job_type 목록과 아래 aliases 를 대조해 사용 가능한 모델만 고른다. 실제 비용은 `higgsfield generate cost` 로 조회하고, 조회가 안 될 때만 아래 credits_per_second 추정치를 쓴다. 요금 정책이 바뀌면 이 값을 직접 수정하라.",
+  "fallback_model": "seedance_2_0",
   "default_duration": 5,
   "aspect_ratio": "9:16",
   "candidates": [
     {
-      "name": "kling-3.0",
-      "aliases": ["kling3", "kling-3", "kling-v3", "kling"],
+      "name": "kling_3_0",
+      "aliases": ["kling-3.0", "kling3", "kling_3", "kling", "kling_v3"],
       "purpose": ["hook", "product_motion", "ending"],
       "credits_per_second": 4.0,
       "max_duration": 10,
       "supports_image_input": true,
       "supports_audio": false,
-      "note": "빠른 제품 후킹/짧은 사실적 움직임"
+      "note": "빠른 제품 후킹 / 짧은 사실적 움직임"
     },
     {
-      "name": "seedance-2.0",
-      "aliases": ["seedance2", "seedance", "seedance-v2"],
+      "name": "seedance_2_0",
+      "aliases": ["seedance-2.0", "seedance2", "seedance", "seedance_v2"],
       "purpose": ["process", "multishot", "audio"],
       "credits_per_second": 6.0,
       "max_duration": 12,
       "supports_image_input": true,
       "supports_audio": true,
-      "note": "멀티샷/오디오가 필요한 장면"
+      "note": "멀티샷 / 오디오가 필요한 장면"
     },
     {
-      "name": "minimax-hailuo-02",
-      "aliases": ["hailuo", "minimax", "hailuo-02"],
+      "name": "minimax_hailuo_02",
+      "aliases": ["minimax-hailuo-02", "hailuo", "minimax", "hailuo_02"],
       "purpose": ["explanation", "abstract"],
       "credits_per_second": 3.0,
       "max_duration": 10,
@@ -35,23 +35,23 @@
       "note": "비용 효율 우선 장면"
     },
     {
-      "name": "wan-2.5",
-      "aliases": ["wan", "wan25", "wan-2-5"],
+      "name": "wan_2_5",
+      "aliases": ["wan-2.5", "wan", "wan25", "wan_2_5"],
       "purpose": ["process", "explanation"],
       "credits_per_second": 3.5,
       "max_duration": 10,
       "supports_image_input": true,
       "supports_audio": false,
-      "note": "제조/가공 과정 장면"
+      "note": "제조 / 가공 과정 장면"
     }
   ],
   "role_preference": {
-    "hook": ["kling-3.0", "minimax-hailuo-02", "wan-2.5", "seedance-2.0"],
-    "process": ["wan-2.5", "seedance-2.0", "kling-3.0", "minimax-hailuo-02"],
-    "explanation": ["minimax-hailuo-02", "wan-2.5", "kling-3.0", "seedance-2.0"],
-    "ending": ["kling-3.0", "seedance-2.0", "wan-2.5", "minimax-hailuo-02"],
-    "evidence": ["minimax-hailuo-02", "kling-3.0", "wan-2.5", "seedance-2.0"],
-    "comparison": ["minimax-hailuo-02", "kling-3.0", "wan-2.5", "seedance-2.0"],
-    "detail": ["minimax-hailuo-02", "kling-3.0", "wan-2.5", "seedance-2.0"]
+    "hook": ["kling_3_0", "minimax_hailuo_02", "wan_2_5", "seedance_2_0"],
+    "process": ["wan_2_5", "seedance_2_0", "kling_3_0", "minimax_hailuo_02"],
+    "explanation": ["minimax_hailuo_02", "wan_2_5", "kling_3_0", "seedance_2_0"],
+    "ending": ["kling_3_0", "seedance_2_0", "wan_2_5", "minimax_hailuo_02"],
+    "evidence": ["minimax_hailuo_02", "kling_3_0", "wan_2_5", "seedance_2_0"],
+    "comparison": ["minimax_hailuo_02", "kling_3_0", "wan_2_5", "seedance_2_0"],
+    "detail": ["minimax_hailuo_02", "kling_3_0", "wan_2_5", "seedance_2_0"]
   }
 }
