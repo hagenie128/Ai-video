@@ -1,47 +1,47 @@
 {
-  "id": "dark_warning",
-  "label": "dark_warning (경고형 다크톤)",
-  "description": "세로 9:16 / 하드컷 전용 / 첫 3초 최소 3컷 / 채도 감소 + 대비 증가 + 약한 필름 그레인 / BGM 자동 덕킹 / 흰색 굵은 자막",
+  "id": "fast_comparison",
+  "label": "fast_comparison (빠른 비교 분석)",
+  "description": "아주 짧은 컷 / 좌우 팬으로 비교 강조 / 대비 강한 톤",
   "width": 1080,
   "height": 1920,
   "fps": 30,
   "cut_rules": {
-    "first": 1.5,
-    "normal": 2.0,
-    "detail": 1.0,
+    "first": 1.0,
+    "normal": 1.2,
+    "detail": 0.7,
     "first_range": [
-      1.2,
-      1.8
-    ],
-    "normal_range": [
-      1.5,
-      2.5
-    ],
-    "detail_range": [
       0.7,
       1.2
+    ],
+    "normal_range": [
+      0.9,
+      1.5
+    ],
+    "detail_range": [
+      0.6,
+      0.9
     ]
   },
-  "default_image_effect": "slow_zoom_in",
+  "default_image_effect": "pan_left_to_right",
   "image_effect_cycle": [
-    "slow_zoom_in",
     "pan_left_to_right",
+    "pan_right_to_left",
     "fast_zoom_in",
-    "pan_right_to_left"
+    "slow_zoom_in"
   ],
   "default_video_effect": "none",
   "transition": "hardcut",
   "video": {
-    "saturation": 0.78,
-    "contrast": 1.12,
-    "brightness": -0.01,
-    "grain": 4
+    "saturation": 0.9,
+    "contrast": 1.2,
+    "brightness": 0.0,
+    "grain": 2
   },
   "subtitle": {
     "mode": "cut",
     "font": "Malgun Gothic",
-    "font_size": 74,
-    "max_chars": 14,
+    "font_size": 76,
+    "max_chars": 13,
     "bold": true,
     "primary_color": "#FFFFFF",
     "outline_color": "#000000",
@@ -52,8 +52,8 @@
   },
   "audio": {
     "voice_volume": 1.0,
-    "bgm_volume": 0.12,
-    "sfx_volume": 0.7,
+    "bgm_volume": 0.13,
+    "sfx_volume": 0.75,
     "ducking": true,
     "duck_threshold": 0.045,
     "duck_ratio": 9.0,
@@ -64,5 +64,5 @@
     "black_tail": 0.8
   },
   "hard_cuts_only": true,
-  "first_3s_min_cuts": 3
+  "first_3s_min_cuts": 4
 }

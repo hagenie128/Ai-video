@@ -71,11 +71,32 @@ def split_script(script: str, max_chars: int) -> list[str]:
 # ---------------------------------------------------------------- 큐 생성
 
 def build_cues(project: dict, timed: list[dict], total_video_duration: float) -> list[dict]:
-    """[{'start','end','text'}] 반환. mode 에 따라 컷 기준 / 대본 기준."""
+    """[{'start','end','text'}] 반환. mode 에 따라 컷 기준 / 대본 기준 / TTS 자동."""
     cfg = project.get("subtitle", {})
     mode = cfg.get("mode", "cut")
     max_chars = cfg.get("max_chars", 14)
     cues: list[dict] = []
+
+    if mode == "auto":
+        # TTS 발화 구간으로 만든 자동 자막 (project["auto_cues"])
+        for cue in project.get("auto_cues") or []:
+            try:
+                start = float(cue.get("start", 0.0))
+                end = float(cue.get("end", 0.0))
+            except (TypeError, ValueError):
+                continue
+            text = wrap_text(str(cue.get("text") or ""), max_chars)
+            if not text or end <= start:
+                continue
+            if total_video_duration > 0:
+                if start >= total_video_duration:
+                    continue
+                end = min(end, total_video_duration)
+            cues.append({"start": round(start, 3), "end": round(end, 3), "text": text})
+        if cues:
+            return [c for c in cues if c["end"] > c["start"] + 0.05]
+        # 자동 자막이 없으면 컷 자막으로 넘어간다
+        mode = "cut"
 
     if mode == "script":
         chunks = split_script(project.get("script", ""), max_chars)

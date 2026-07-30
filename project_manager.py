@@ -62,6 +62,7 @@ def default_project(name: str, preset_name: str = "dark_warning") -> dict:
         "tts": {},                        # TTS 결과 (파일, 길이, 장면별 타이밍)
         "auto_cues": [],                  # TTS 기반 자동 자막 큐
         "automation_log": [],             # 단계별 진행/실패 기록
+        "automation_options": {},         # 전체 자동 생성 옵션
         "credit_usage": {"estimated": 0.0, "actual": 0.0},
     }
 
@@ -154,7 +155,8 @@ def migrate(project: dict) -> dict:
             merged[key] = {**base[key], **value}
         else:
             merged[key] = value
-    for key in ("ai_brief", "ai_settings", "script_data", "media_analysis", "tts", "credit_usage"):
+    for key in ("ai_brief", "ai_settings", "script_data", "media_analysis", "tts",
+                "credit_usage", "automation_options"):
         if not isinstance(merged.get(key), dict):
             merged[key] = dict(base[key])
     for key in ("scene_plan", "higgsfield_generations", "automation_log", "auto_cues"):

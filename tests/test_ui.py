@@ -127,6 +127,21 @@ def main() -> int:
     check("장면 계획 저장됨", bool(project.get("scene_plan")),
           f"{len(project.get('scene_plan') or [])}개")
 
+    # 전체 생성 화면의 옵션/버튼이 실제로 있는지 (파이프라인 실행은 test_step4 에서 검증)
+    at = run_page("0. AI 자동 제작", project)
+    labels = [b.label for b in at.button]
+    check("전체 생성 버튼 존재", any("AI 쇼츠 전체 생성" in label for label in labels))
+    checkbox_keys = [c.key or "" for c in at.checkbox]
+    for key in ("op_script", "op_tts", "op_hf", "op_sub", "op_bgm", "op_sfx", "op_tl", "op_render"):
+        check(f"생성 옵션 존재: {key}", key in checkbox_keys)
+    check("자막 미리보기 버튼 존재", any("미리보기 만들기" in label for label in labels))
+
+    target = next((b for b in at.button if "미리보기 만들기" in b.label), None)
+    if target is not None:
+        after = target.click().run()
+        check("자막 미리보기 동작", not after.exception,
+              "; ".join(str(e.value) for e in after.exception)[:300])
+
     # Higgsfield 섹션: AI 장면이 있을 때 승인/대체/수동 업로드 UI 가 나오는지
     import scene_planner as sp_mod
     ai_scenes = sp_mod.ai_items(project.get("scene_plan") or [])

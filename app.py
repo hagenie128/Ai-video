@@ -262,12 +262,16 @@ def page_script(p: dict) -> None:
 
     st.divider()
     st.subheader("자막 소스")
-    modes = ["cut", "script"]
-    labels = {"cut": "컷별 자막 직접 입력", "script": "대본 기준 자동 분할"}
+    modes = ["cut", "script", "auto"]
+    labels = {
+        "cut": "컷별 자막 직접 입력",
+        "script": "대본 기준 자동 분할",
+        "auto": f"TTS 발화 기준 자동 자막 ({len(p.get('auto_cues') or [])}개)",
+    }
     p["subtitle"]["mode"] = st.radio(
         "자막 생성 방식",
         modes,
-        index=modes.index(p["subtitle"].get("mode", "cut")),
+        index=modes.index(p["subtitle"].get("mode", "cut")) if p["subtitle"].get("mode") in modes else 0,
         format_func=lambda v: labels[v],
         horizontal=True,
         key="sub_mode",

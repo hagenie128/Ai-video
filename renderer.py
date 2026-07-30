@@ -421,6 +421,78 @@ def _resolve_media(project: dict, rel: str | None) -> Path | None:
     return path if path.is_file() else None
 
 
+def preview_frame(project: dict, text: str, out_path: Path | None = None,
+                  safe_area: bool = True) -> Path:
+    """실제 9:16 프레임 위에 자막을 얹은 미리보기 PNG 를 만든다.
+
+    렌더링과 같은 ASS 스타일을 그대로 써서 실제 결과와 같은 모습을 보여준다.
+    """
+    require_ffmpeg()
+    width = int(project.get("width", 1080))
+    height = int(project.get("height", 1920))
+    work = TEMP_DIR / f"subpreview_{safe_filename(project.get('name', 'p'))}"
+    cleanup_dir(work)
+    work.mkdir(parents=True, exist_ok=True)
+
+    cues = [{"start": 0.0, "end": 2.0, "text": subs_mod.wrap_text(
+        text or "자막 미리보기", int((project.get("subtitle") or {}).get("max_chars", 14)))}]
+    subs_mod.write_ass(project, cues, work / "preview.ass")
+
+    background: str | None = None
+    for cut in project.get("cuts", []):
+        if not cut.get("enabled", True) or cut.get("type") != "image":
+            continue
+        path = pm.abs_path(project, cut["file"])
+        if path.is_file():
+            background = str(path)
+            break
+
+    chain = [
+        f"scale={width}:{height}:force_original_aspect_ratio=increase",
+        f"crop={width}:{height}",
+        "setsar=1",
+    ]
+    if safe_area:
+        # 쇼츠 UI 가 가리는 영역 가이드 (상단 12%, 하단 20%, 우측 16%)
+        top = int(height * 0.12)
+        bottom = int(height * 0.20)
+        right = int(width * 0.16)
+        chain += [
+            f"drawbox=x=0:y=0:w={width}:h={top}:color=red@0.16:t=fill",
+            f"drawbox=x=0:y={height - bottom}:w={width}:h={bottom}:color=red@0.16:t=fill",
+            f"drawbox=x={width - right}:y={top}:w={right}:h={height - top - bottom}:"
+            f"color=red@0.10:t=fill",
+        ]
+    chain.append("ass=preview.ass")
+
+    out_path = out_path or unique_path(work / "subtitle_preview.png")
+    if background:
+        args = ["-loop", "1", "-t", "0.1", "-i", background, "-vf", ",".join(chain),
+                "-frames:v", "1", str(out_path)]
+    else:
+        args = ["-f", "lavfi", "-i", f"color=c=0x202028:s={width}x{height}:d=0.1",
+                "-vf", ",".join(chain), "-frames:v", "1", str(out_path)]
+    run_ffmpeg(args, cwd=work)
+    return out_path
+
+
+def extract_frames(video: Path, seconds: list[float], out_dir: Path) -> list[tuple[float, Path]]:
+    """검수용 프레임 추출. 실패한 시점은 건너뛴다."""
+    require_ffmpeg()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    frames: list[tuple[float, Path]] = []
+    for value in seconds:
+        target = out_dir / f"frame_{value:0.2f}.png".replace(".", "_", 1)
+        try:
+            run_ffmpeg(["-ss", f"{max(0.0, value):.3f}", "-i", str(video),
+                        "-frames:v", "1", "-q:v", "3", str(target)], cwd=out_dir)
+        except FFmpegError:
+            continue
+        if target.is_file():
+            frames.append((value, target))
+    return frames
+
+
 def export_subtitles(project: dict) -> tuple[Path, Path] | None:
     """현재 설정으로 SRT/ASS 를 프로젝트 폴더에 저장."""
     fps = int(project.get("fps", 30))

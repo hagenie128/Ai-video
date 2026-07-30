@@ -10,10 +10,12 @@ from pathlib import Path
 import streamlit as st
 
 import ai_provider
+import automation_pipeline as ap
 import config
 import higgsfield_service as hf
 import media_analyzer as ma
 import project_manager as pm
+import renderer
 import scene_planner as sp
 import script_generator as sg
 import timeline as tl
@@ -543,6 +545,159 @@ def _log(project: dict, step: str, ok: bool, message: str) -> None:
 
 # ---------------------------------------------------------------- 화면
 
+# ---------------------------------------------------------------- 전체 자동 생성
+
+def _options(project: dict) -> dict:
+    saved = project.get("automation_options") or {}
+    return {**ap.default_options(), **saved}
+
+
+def section_pipeline(project: dict, brief: dict) -> None:
+    st.subheader("⑧ AI 쇼츠 전체 생성")
+    opts = _options(project)
+
+    st.caption("생성 옵션")
+    c1, c2, c3, c4 = st.columns(4)
+    opts["script"] = c1.checkbox("대본 자동 생성", value=bool(opts["script"]), key="op_script")
+    opts["tts"] = c2.checkbox("TTS 자동 생성", value=bool(opts["tts"]), key="op_tts")
+    opts["higgsfield"] = c3.checkbox("Higgsfield 영상 자동 생성", value=bool(opts["higgsfield"]),
+                                     key="op_hf",
+                                     help="크레딧이 사용됩니다. 승인 방식과 예산은 '8. AI 연동 설정'에서 정합니다.")
+    opts["subtitles"] = c4.checkbox("자동 자막", value=bool(opts["subtitles"]), key="op_sub")
+    c1, c2, c3, c4 = st.columns(4)
+    opts["bgm"] = c1.checkbox("BGM 자동 선택", value=bool(opts["bgm"]), key="op_bgm")
+    opts["sfx"] = c2.checkbox("효과음 자동 선택", value=bool(opts["sfx"]), key="op_sfx")
+    opts["timeline"] = c3.checkbox("자동 타임라인 구성", value=bool(opts["timeline"]), key="op_tl")
+    opts["render"] = c4.checkbox("최종 MP4 자동 렌더링", value=bool(opts["render"]), key="op_render")
+    c1, c2 = st.columns(2)
+    opts["vision"] = c1.checkbox("사진 비전 분석 사용", value=bool(opts["vision"]) and ai_provider.available(),
+                                 key="op_vision", disabled=not ai_provider.available())
+    preview_only = c2.checkbox("빠른 저화질로 먼저 확인 (540x960)", value=False, key="op_preview")
+    project["automation_options"] = opts
+
+    if opts["higgsfield"]:
+        st.warning("Higgsfield 자동 생성이 켜져 있습니다. 승인 방식이 '매번 승인'이면 "
+                   "파이프라인은 생성을 건너뛰고 승인 대기로 표시합니다.")
+
+    c1, c2 = st.columns([1, 3])
+    start = c1.button("🚀 AI 쇼츠 전체 생성", type="primary", key="op_run",
+                      disabled=not project.get("cuts"))
+    if not project.get("cuts"):
+        c2.caption("먼저 사진이나 영상을 등록하세요.")
+    else:
+        c2.caption("9단계를 순서대로 진행합니다. 한 단계가 실패해도 멈추지 않고 가능한 단계까지 계속 진행하며, "
+                   "실패한 단계는 수동 작업으로 전환됩니다.")
+
+    if start:
+        _run_pipeline(project, opts, preview_only)
+
+    _render_pipeline_report(project, opts, preview_only)
+
+
+def _run_pipeline(project: dict, opts: dict, preview: bool, start_at: str = "") -> None:
+    total = len(ap.STEPS)
+    bar = st.progress(0.0, text="준비 중")
+    status = st.empty()
+
+    def progress(index: int, label: str, message: str) -> None:
+        bar.progress(min(1.0, (index + 0.5) / total), text=f"{index + 1}/{total} {label}")
+        status.caption(f"{index + 1}/{total} {label} — {message}")
+
+    if start_at:
+        result = ap.retry_from(project, start_at, opts, progress, preview)
+    else:
+        result = ap.run(project, opts, progress, preview)
+    bar.progress(1.0, text="완료")
+    status.empty()
+
+    st.session_state["_pipeline"] = {
+        "steps": [(s.key, s.label, s.status, s.message, s.detail) for s in result.steps],
+        "output": str(result.output) if result.output else "",
+        "manual": result.manual_actions,
+        "summary": result.summary(),
+    }
+    pm.save_project(project)
+    st.rerun()
+
+
+def _render_pipeline_report(project: dict, opts: dict, preview: bool) -> None:
+    data = st.session_state.get("_pipeline")
+    if not data:
+        return
+
+    st.divider()
+    st.markdown(f"**진행 결과** — {data['summary']}")
+    for i, (key, label, step_status, message, detail) in enumerate(data["steps"]):
+        icon = {"ok": "✅", "failed": "❌", "manual": "✋", "skipped": "⏭"}.get(step_status, "•")
+        cols = st.columns([4.2, 1.0])
+        cols[0].markdown(f"{icon} **{i + 1}/{len(data['steps'])} {label}** — {message}")
+        if detail:
+            cols[0].caption(detail)
+        if step_status in ("failed", "manual"):
+            if cols[1].button("이 단계부터 재시도", key=f"retry_{key}"):
+                _run_pipeline(project, opts, preview, start_at=key)
+
+    if data["manual"]:
+        st.warning("수동으로 해야 할 일:\n\n" + "\n".join(f"· {m}" for m in data["manual"]))
+
+    output = data.get("output")
+    if output and Path(output).is_file():
+        st.success(f"결과 파일: `{output}`")
+        st.video(output)
+        st.download_button("MP4 다운로드", Path(output).read_bytes(), Path(output).name,
+                           "video/mp4", key="op_dl")
+        st.caption("장면·대본·자막을 수정한 뒤 '7. 출력'에서 다시 렌더링하면 반영됩니다.")
+
+
+# ---------------------------------------------------------------- 자막 미리보기
+
+def section_subtitle_preview(project: dict) -> None:
+    st.subheader("⑨ 자막 미리보기 (9:16 안전 영역)")
+    cfg = project.setdefault("subtitle", {})
+    cues = project.get("auto_cues") or []
+    default_text = ""
+    if cues:
+        default_text = str(cues[0].get("text") or "")
+    elif project.get("script_data", {}).get("scenes"):
+        default_text = project["script_data"]["scenes"][0].get("subtitle", "")
+
+    c1, c2 = st.columns([2, 3])
+    with c1:
+        text = st.text_input("미리볼 자막", value=default_text.replace("\n", " "), key="sp_text")
+        cfg["margin_v"] = st.slider("자막 위치 (하단 여백)", 60, 900, int(cfg.get("margin_v", 300)), 10,
+                                    key="sp_margin")
+        cfg["font_size"] = st.slider("글자 크기", 30, 140, int(cfg.get("font_size", 74)), 1, key="sp_size")
+        cfg["max_chars"] = st.slider("한 줄 최대 글자 수", 6, 24, int(cfg.get("max_chars", 14)), 1,
+                                     key="sp_chars")
+        show_safe = st.checkbox("모바일 안전 영역 표시", value=True, key="sp_safe")
+        if st.button("미리보기 만들기", type="primary", key="sp_make"):
+            try:
+                path = renderer.preview_frame(project, text, safe_area=show_safe)
+                st.session_state["_sub_preview"] = str(path)
+                pm.save_project(project)
+            except Exception as exc:  # noqa: BLE001 - 미리보기 실패가 작업을 막지 않는다
+                st.error(f"미리보기 생성 실패: {exc}")
+        st.caption("붉은 영역은 쇼츠 UI(제목·버튼)가 가릴 수 있는 자리입니다. 자막이 그 안에 들어가지 않게 하세요.")
+    with c2:
+        preview = st.session_state.get("_sub_preview")
+        if preview and Path(preview).is_file():
+            st.image(preview, width=320)
+        else:
+            st.caption("왼쪽에서 '미리보기 만들기'를 누르면 실제 렌더링과 같은 자막 모양을 확인할 수 있습니다.")
+
+    if cues:
+        with st.expander(f"자동 자막 {len(cues)}개 확인/수정"):
+            for i, cue in enumerate(cues[:40]):
+                c1, c2, c3 = st.columns([1, 1, 4])
+                c1.caption(f"{cue['start']:.2f}s")
+                c2.caption(f"{cue['end']:.2f}s")
+                cue["text"] = c3.text_input(f"자막 {i + 1}", value=cue.get("text", ""),
+                                            key=f"sc_cue_{i}", label_visibility="collapsed")
+            if st.button("자동 자막 저장", key="sp_save_cues"):
+                pm.save_project(project)
+                st.success("저장했습니다. 다시 렌더링하면 반영됩니다.")
+
+
 def page(project: dict, bump) -> None:
     st.header("0. AI 자동 제작")
     st.caption(SAFETY_NOTE)
@@ -551,6 +706,8 @@ def page(project: dict, bump) -> None:
     section_brief(project, brief)
     st.divider()
     section_material(project, brief, bump)
+    st.divider()
+    section_pipeline(project, brief)
     st.divider()
     section_script(project, brief)
     st.divider()
@@ -561,6 +718,8 @@ def page(project: dict, bump) -> None:
     ui_higgsfield.section(project)
     st.divider()
     section_draft(project)
+    st.divider()
+    section_subtitle_preview(project)
 
     project["ai_settings"] = config.sanitize_for_project(config.load_settings())
     pm.save_project(project)
