@@ -11,6 +11,8 @@ import streamlit as st
 import project_manager as pm
 import renderer
 import timeline as tl
+import ui_ai_settings
+import ui_auto
 from audio import describe as audio_describe
 from renderer import RenderError
 from subtitles import split_script
@@ -30,6 +32,7 @@ from utils import (
 st.set_page_config(page_title="AI Shorts Maker", page_icon="🎬", layout="wide")
 
 PAGES = [
+    "0. AI 자동 제작",
     "1. 프로젝트 설정",
     "2. 대본과 음성",
     "3. 미디어 업로드",
@@ -37,6 +40,7 @@ PAGES = [
     "5. 자막 설정",
     "6. 오디오 설정",
     "7. 출력",
+    "8. AI 연동 설정",
 ]
 
 
@@ -292,7 +296,8 @@ def page_script(p: dict) -> None:
 
 # ---------------------------------------------------------------- 3. 미디어 업로드
 
-def _add_media(p: dict, files, kind: str) -> int:
+def add_media_files(p: dict, files, kind: str) -> int:
+    """미디어 업로드 → 컷 등록. '0. AI 자동 제작' 화면도 이 함수를 쓴다."""
     added = 0
     category = "images" if kind == "image" else "videos"
     for f in files:
@@ -331,7 +336,7 @@ def page_media(p: dict) -> None:
             accept_multiple_files=True, key=f"img_up_{seq()}",
         )
         if photos and st.button(f"사진 {len(photos)}장 추가", type="primary", key="btn_add_img"):
-            count = _add_media(p, photos, "image")
+            count = add_media_files(p, photos, "image")
             autosave()
             bump_uploader()
             st.toast(f"사진 {count}장 추가")
@@ -344,7 +349,7 @@ def page_media(p: dict) -> None:
             accept_multiple_files=True, key=f"vid_up_{seq()}",
         )
         if videos and st.button(f"영상 {len(videos)}개 추가", type="primary", key="btn_add_vid"):
-            count = _add_media(p, videos, "video")
+            count = add_media_files(p, videos, "video")
             autosave()
             bump_uploader()
             st.toast(f"영상 {count}개 추가")
@@ -677,24 +682,37 @@ def page_output(p: dict) -> None:
 def main() -> None:
     sidebar()
     p = project()
+    page = state().get("page", PAGES[0])
+
     if not p:
+        if page == PAGES[8]:                       # AI 연동 설정은 프로젝트 없이도 열 수 있다
+            ui_ai_settings.page(None)
+            return
         st.title("AI Shorts Maker")
         st.write("왼쪽 사이드바에서 새 프로젝트를 만들거나 기존 프로젝트를 여세요.")
         st.markdown(
-            "**진행 순서** — ① 프로젝트 생성 → ② 대본·음성 → ③ 사진·영상·BGM 업로드 → "
+            "**AI 자동 제작** — ① 프로젝트 생성 → ② 사진 업로드 + 상품 정보 입력 → "
+            "③ 'AI 쇼츠 전체 생성' → ④ 검수·수정 → ⑤ 최종 렌더링\n\n"
+            "**수동 편집** — ① 프로젝트 생성 → ② 대본·음성 → ③ 사진·영상·BGM 업로드 → "
             "④ 타임라인 정리 → ⑤ 자막 → ⑥ 오디오 → ⑦ 렌더링"
         )
         return
 
-    page = state().get("page", PAGES[0])
+    if page == PAGES[0]:
+        ui_auto.page(p, seq)
+        set_project(p)
+        return
+    if page == PAGES[8]:
+        ui_ai_settings.page(p)
+        return
     {
-        PAGES[0]: page_settings,
-        PAGES[1]: page_script,
-        PAGES[2]: page_media,
-        PAGES[3]: page_timeline,
-        PAGES[4]: page_subtitle,
-        PAGES[5]: page_audio,
-        PAGES[6]: page_output,
+        PAGES[1]: page_settings,
+        PAGES[2]: page_script,
+        PAGES[3]: page_media,
+        PAGES[4]: page_timeline,
+        PAGES[5]: page_subtitle,
+        PAGES[6]: page_audio,
+        PAGES[7]: page_output,
     }[page](p)
     autosave()
 

@@ -5,11 +5,22 @@
 __pycache__/
 *.py[cod]
 
+# 비밀값 (API 키) — 절대 커밋하지 않는다
+.env
+
 # 로컬 작업 데이터 (앱이 실행될 때 자동 생성됨)
 projects/
 outputs/
 temp/
+logs/
 bin/
+ai_settings.json
+
+# 사용자 소유 음원 (저작권 자료를 저장소에 올리지 않는다)
+assets/music/*
+assets/sfx/*
+!assets/music/.gitkeep
+!assets/sfx/.gitkeep
 
 # Streamlit 로컬 설정
 .streamlit/

@@ -95,11 +95,26 @@ if not exist ".venv\Scripts\python.exe" (
     )
 ) else (
     echo [3/4] Virtual environment OK
-    ".venv\Scripts\python.exe" -c "import streamlit" >nul 2>&1
+    ".venv\Scripts\python.exe" -c "import streamlit, edge_tts" >nul 2>&1
     if not !errorlevel!==0 (
-        echo       Reinstalling packages...
+        echo       Installing/updating packages...
         ".venv\Scripts\python.exe" -m pip install -r requirements.txt --quiet
     )
+)
+
+REM ---------- Higgsfield CLI (optional) ----------
+where npm >nul 2>&1
+if %errorlevel%==0 (
+    where higgsfield >nul 2>&1
+    if !errorlevel!==0 (
+        echo       Higgsfield CLI found.
+    ) else (
+        echo       Higgsfield CLI not installed ^(optional^).
+        echo       To enable AI video generation:  npm i -g @higgsfield/cli
+        echo       Then log in:                    higgsfield auth login
+    )
+) else (
+    echo       Node.js/npm not found ^(optional, only needed for Higgsfield^).
 )
 
 REM ---------- run ----------
