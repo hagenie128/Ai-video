@@ -8,6 +8,7 @@ from pathlib import Path
 
 import streamlit as st
 
+import media_analyzer as ma
 import project_manager as pm
 import renderer
 import timeline as tl
@@ -407,6 +408,30 @@ def page_media(p: dict) -> None:
 
 # ---------------------------------------------------------------- 4. 타임라인
 
+ROLE_BADGE = {
+    "hook": "🎯 hook", "evidence": "🔎 evidence", "comparison": "⚖️ comparison",
+    "process": "🛠 process", "explanation": "💬 explanation", "detail": "🔬 detail",
+    "ending": "🏁 ending", "unused": "⬜ unused", "": "—",
+}
+
+
+def _timeline_header(p: dict) -> None:
+    """상단 고정 요약: 총 길이, 첫 3초 컷 수, 사진/영상 수, 예상 렌더 시간, 크레딧."""
+    stats = tl.stats(p)
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("총 길이", f"{stats['duration']:.2f}초")
+    c2.metric("첫 3초 컷", f"{stats['first_window']}컷",
+              delta=None if stats["first_window"] >= 3 else "3컷 미만",
+              delta_color="off" if stats["first_window"] >= 3 else "inverse")
+    c3.metric("사진 / 영상", f"{stats['images']} / {stats['videos']}")
+    c4.metric("예상 렌더", f"{stats['render_estimate']:.0f}초")
+    c5.metric("Higgsfield 크레딧", f"{stats['credits_actual']:.1f}",
+              help=f"예상 누적 {stats['credits_estimated']:.1f} 크레딧")
+    line = (f"AI 생성 컷 {stats['ai_cuts']}개 · 생성 실패/대기 {stats['failed']}개 · "
+            f"미사용 {stats['unused']}개 · 같은 타입 최대 {stats['max_run']}연속")
+    (st.warning if stats["failed"] else st.caption)(line)
+
+
 def page_timeline(p: dict) -> None:
     st.header("4. 타임라인")
     cuts = p.get("cuts", [])
@@ -414,78 +439,137 @@ def page_timeline(p: dict) -> None:
         st.warning("먼저 '3. 미디어 업로드'에서 사진이나 영상을 추가하세요.")
         return
 
-    st.info(tl.summary(p))
-    c1, c2, c3 = st.columns(3)
-    if c1.button("프리셋 길이 규칙 적용", key="btn_rule_dur"):
+    _timeline_header(p)
+
+    c1, c2, c3, c4 = st.columns(4)
+    if c1.button("프리셋 길이 규칙 적용", key="btn_rule_dur", width="stretch"):
         tl.apply_preset_durations(p)
         autosave()
         st.rerun()
-    if c2.button("목표 길이에 맞추기", key="btn_fit"):
+    if c2.button("목표 길이에 맞추기", key="btn_fit", width="stretch"):
         ok, message = tl.fit_to_target(p)
         autosave()
         (st.success if ok else st.warning)(message)
-    if c3.button("전체 사용 설정", key="btn_enable_all"):
+    if c3.button("전체 사용 설정", key="btn_enable_all", width="stretch"):
         for cut in cuts:
             cut["enabled"] = True
         autosave()
         st.rerun()
+    if c4.button("쇼츠 초안 자동 구성", key="btn_auto_draft", width="stretch", type="primary"):
+        plan_items = p.get("scene_plan") or []
+        if not plan_items:
+            st.warning("먼저 '0. AI 자동 제작'에서 대본과 장면 계획을 만드세요.")
+        else:
+            count, message = tl.auto_build(p, plan_items, p.get("tts") or None)
+            autosave()
+            (st.success if count else st.warning)(message)
+            if count:
+                st.rerun()
+
+    only_used = st.checkbox("사용 중인 컷만 보기", value=False, key="tl_filter")
 
     st.divider()
     for i, cut in enumerate(cuts):
-        with st.container(border=True):
-            head, body, ctrl = st.columns([1.1, 4.4, 1.0])
-
-            with head:
-                path = pm.abs_path(p, cut["file"])
-                if cut["type"] == "image" and path.is_file():
-                    st.image(str(path), width="stretch")
-                else:
-                    st.markdown(f"### {'🖼️' if cut['type'] == 'image' else '🎞️'}")
-                st.caption(f"#{i + 1} · {cut['type']}")
-
-            with body:
-                st.write(f"**{relabel(cut)}**"
-                         + (f"  ·  원본 {cut.get('source_duration', 0):.2f}초" if cut["type"] == "video" and cut.get("source_duration") else ""))
-                r1c1, r1c2, r1c3, r1c4 = st.columns([1, 1.2, 1.2, 2])
-                cut["enabled"] = r1c1.checkbox("사용", value=cut.get("enabled", True), key=f"en_{cut['id']}")
-                cut["duration"] = r1c2.number_input(
-                    "길이(초)", tl.MIN_DURATION, tl.MAX_DURATION,
-                    float(tl.clamp_duration(cut.get("duration", 2.0))), 0.1, key=f"du_{cut['id']}",
-                )
-                cut["role"] = r1c3.selectbox(
-                    "컷 역할", tl.ROLES, index=tl.ROLES.index(cut.get("role", "auto")),
-                    format_func=lambda v: tl.ROLE_LABELS[v], key=f"ro_{cut['id']}",
-                )
-                cut["effect"] = r1c4.selectbox(
-                    "효과", tl.EFFECTS,
-                    index=tl.EFFECTS.index(cut.get("effect", "none")) if cut.get("effect") in tl.EFFECTS else 0,
-                    format_func=lambda v: tl.EFFECT_LABELS[v], key=f"ef_{cut['id']}",
-                )
-                cut["subtitle"] = st.text_input(
-                    "컷 자막", value=cut.get("subtitle", ""), key=f"su_{cut['id']}",
-                    placeholder="이 컷에서 보여줄 자막",
-                )
-
-            with ctrl:
-                if st.button("▲", key=f"up_{cut['id']}", width="stretch", disabled=i == 0):
-                    tl.move_cut(cuts, i, -1)
-                    autosave()
-                    st.rerun()
-                if st.button("▼", key=f"dn_{cut['id']}", width="stretch", disabled=i == len(cuts) - 1):
-                    tl.move_cut(cuts, i, 1)
-                    autosave()
-                    st.rerun()
-                if st.button("🗑 삭제", key=f"de_{cut['id']}", width="stretch"):
-                    removed = tl.delete_cut(cuts, i)
-                    if removed:
-                        pm.remove_media_file(p, removed["file"])
-                    autosave()
-                    st.rerun()
+        if only_used and not cut.get("enabled", True):
+            continue
+        _timeline_card(p, cuts, cut, i)
 
     st.caption(
         "zoom/pan 효과는 사진 컷에만 적용됩니다. 영상 컷은 원본 움직임을 그대로 쓰고, "
-        "길이가 모자라면 마지막 프레임을 유지합니다. 컷 사이는 모두 하드컷입니다."
+        "길이가 모자라면 마지막 프레임을 유지합니다. 컷 사이는 모두 하드컷입니다. "
+        "잠금(🔒)한 컷은 '쇼츠 초안 자동 구성'에서도 효과/설정이 유지됩니다."
     )
+
+
+def _timeline_card(p: dict, cuts: list[dict], cut: dict, i: int) -> None:
+    disabled = not cut.get("enabled", True)
+    cid = cut["id"]
+    with st.container(border=True):
+        thumb, body, ctrl = st.columns([0.9, 5.1, 0.9])
+
+        with thumb:
+            path = pm.abs_path(p, cut["file"])
+            if cut["type"] == "image" and path.is_file():
+                st.image(str(path), width="stretch")
+            elif cut["type"] == "video" and path.is_file():
+                st.markdown("### 🎞️")
+            else:
+                st.markdown("### ⚠️")
+            st.caption(f"#{i + 1}")
+
+        with body:
+            # 1줄: 이름/배지 + 사용/잠금 + 길이 + 효과 + 관심영역
+            badge = ROLE_BADGE.get(cut.get("scene_role", ""), cut.get("scene_role", "—"))
+            marks = []
+            if cut.get("source") in ("higgsfield", "manual_ai"):
+                marks.append("🤖 AI 생성")
+            if cut.get("generation_status") == "pending":
+                marks.append("⏳ AI 생성 대기 (임시 사진)")
+            if cut.get("generation_status") in ("failed", "ai_failed"):
+                marks.append("❌ 생성 실패")
+            if cut.get("locked"):
+                marks.append("🔒 잠금")
+            title = f"{'~~' if disabled else '**'}{relabel(cut)}{'~~' if disabled else '**'}"
+            extra = f" · 원본 {cut.get('source_duration', 0):.2f}초" if (
+                cut["type"] == "video" and cut.get("source_duration")) else ""
+            st.markdown(f"{title} &nbsp; `{badge}`"
+                        + (f" &nbsp; {' · '.join(marks)}" if marks else "") + extra,
+                        unsafe_allow_html=True)
+
+            r1 = st.columns([0.8, 0.8, 1.0, 1.0, 1.6, 1.4])
+            cut["enabled"] = r1[0].checkbox("사용", value=cut.get("enabled", True), key=f"en_{cid}")
+            cut["locked"] = r1[1].checkbox("잠금", value=bool(cut.get("locked", False)), key=f"lk_{cid}")
+            position = r1[2].number_input("순서", 1, max(1, len(cuts)), i + 1, 1, key=f"po_{cid}")
+            cut["duration"] = r1[3].number_input(
+                "길이(초)", tl.MIN_DURATION, tl.MAX_DURATION,
+                float(tl.clamp_duration(cut.get("duration", 2.0))), 0.1, key=f"du_{cid}")
+            cut["effect"] = r1[4].selectbox(
+                "효과", tl.EFFECTS,
+                index=tl.EFFECTS.index(cut.get("effect", "none")) if cut.get("effect") in tl.EFFECTS else 0,
+                format_func=lambda v: tl.EFFECT_LABELS[v], key=f"ef_{cid}",
+                disabled=cut["type"] == "video")
+            cut["focus"] = r1[5].selectbox(
+                "관심 영역", ma.FOCUS_CHOICES,
+                index=ma.FOCUS_CHOICES.index(cut.get("focus", "center"))
+                if cut.get("focus") in ma.FOCUS_CHOICES else 0,
+                format_func=lambda v: ma.FOCUS_LABELS[v], key=f"fo_{cid}")
+
+            # 2줄: 자막 + (custom 이면 초점 좌표) + 컷 역할
+            r2 = st.columns([3.4, 1.3, 1.3])
+            cut["subtitle"] = r2[0].text_input(
+                "컷 자막", value=cut.get("subtitle", ""), key=f"su_{cid}",
+                placeholder="이 컷에서 보여줄 자막")
+            if cut.get("focus") == "custom":
+                xy = cut.get("focus_xy") or [0.5, 0.5]
+                cut["focus_xy"] = [
+                    r2[1].slider("초점 X", 0.0, 1.0, float(xy[0]), 0.02, key=f"fx_{cid}"),
+                    r2[2].slider("초점 Y", 0.0, 1.0, float(xy[1]), 0.02, key=f"fy_{cid}"),
+                ]
+            else:
+                cut["role"] = r2[1].selectbox(
+                    "길이 규칙", tl.ROLES, index=tl.ROLES.index(cut.get("role", "auto")),
+                    format_func=lambda v: tl.ROLE_LABELS[v], key=f"ro_{cid}")
+                r2[2].caption(f"장면 {cut.get('scene_id') or '-'}")
+
+            if position != i + 1 and tl.reorder(cuts, cid, int(position)):
+                autosave()
+                st.rerun()
+
+        with ctrl:
+            if st.button("▲", key=f"up_{cid}", width="stretch", disabled=i == 0):
+                tl.move_cut(cuts, i, -1)
+                autosave()
+                st.rerun()
+            if st.button("▼", key=f"dn_{cid}", width="stretch", disabled=i == len(cuts) - 1):
+                tl.move_cut(cuts, i, 1)
+                autosave()
+                st.rerun()
+            if st.button("🗑", key=f"de_{cid}", width="stretch", help="컷과 파일 삭제"):
+                removed = tl.delete_cut(cuts, i)
+                if removed:
+                    pm.remove_media_file(p, removed["file"])
+                autosave()
+                st.rerun()
 
 
 # ---------------------------------------------------------------- 5. 자막 설정

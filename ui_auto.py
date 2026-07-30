@@ -11,8 +11,12 @@ import streamlit as st
 
 import ai_provider
 import config
+import higgsfield_service as hf
+import media_analyzer as ma
 import project_manager as pm
+import scene_planner as sp
 import script_generator as sg
+import timeline as tl
 import tts_service
 from utils import AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS
 
@@ -322,14 +326,189 @@ def section_script(project: dict, brief: dict) -> None:
         st.caption("점검은 자동 판정이 아니라 확인 목록입니다. 최종 판단은 사용자가 합니다.")
 
 
-def _media_summary(project: dict) -> str:
+# ---------------------------------------------------------------- 자료 분석 / 장면 계획
+
+def section_analysis(project: dict) -> None:
+    st.subheader("④ 자료 분석과 역할 지정")
+    if not project.get("cuts"):
+        st.info("먼저 사진이나 영상을 등록하세요.")
+        return
+
+    c1, c2 = st.columns([1, 3])
+    use_vision = c2.checkbox(
+        "비전 모델로 사진 내용까지 분석 (LLM 키 필요)", value=ai_provider.available(),
+        key="auto_vision", disabled=not ai_provider.available(),
+        help="키가 없으면 해상도·비율·밝기·파일명·유사도 기준으로 분석합니다.")
+    if c1.button("자료 분석 실행", type="primary", key="auto_analyze"):
+        bar = st.progress(0.0, text="분석 준비")
+
+        def cb(fraction: float, message: str) -> None:
+            bar.progress(min(1.0, fraction), text=message)
+
+        try:
+            ma.analyze_project(project, use_vision=use_vision, progress_cb=cb)
+            _log(project, "analyze", True, ma.stats(project))
+        except Exception as exc:  # noqa: BLE001 - 분석 실패로 앱을 멈추지 않는다
+            _log(project, "analyze", False, str(exc))
+            st.error(f"분석 실패: {exc}")
+        bar.empty()
+        pm.save_project(project)
+        st.rerun()
+
     analysis = project.get("media_analysis") or {}
-    if analysis:
-        lines = []
-        for rel, info in list(analysis.items())[:20]:
-            tags = ", ".join(info.get("tags", [])[:5])
-            lines.append(f"- {Path(rel).name}: {info.get('description') or info.get('kind', '')} [{tags}]")
-        return "\n".join(lines)
+    if not analysis:
+        st.caption("분석 전입니다. 분석하면 각 자료에 역할과 태그, 관심 영역이 자동으로 지정됩니다.")
+        return
+
+    st.success(ma.stats(project))
+    broken = [rel for rel, info in analysis.items() if info.get("error")]
+    if broken:
+        st.warning(f"읽을 수 없는 파일 {len(broken)}개는 자동 배치에서 제외됩니다: "
+                   + ", ".join(Path(b).name for b in broken[:5]))
+
+    with st.expander("자료별 역할 / 태그 / 고정", expanded=False):
+        for cut in project.get("cuts", []):
+            info = analysis.get(cut["file"]) or {}
+            with st.container(border=True):
+                thumb, body = st.columns([1, 6])
+                with thumb:
+                    path = pm.abs_path(project, cut["file"])
+                    if cut["type"] == "image" and path.is_file():
+                        st.image(str(path), width="stretch")
+                    else:
+                        st.markdown("### 🎞️" if cut["type"] == "video" else "### ⚠️")
+                with body:
+                    st.caption(f"**{cut.get('name')}** · 품질 {info.get('quality', 0):.2f} · "
+                               f"유사그룹 {info.get('similar_group', -1)}"
+                               + (f" · {info['description']}" if info.get("description") else ""))
+                    r1, r2, r3 = st.columns([1.2, 3, 1])
+                    roles = ma.ROLES
+                    current = cut.get("scene_role") or "unused"
+                    cut["scene_role"] = r1.selectbox(
+                        "역할", roles, index=roles.index(current) if current in roles else 7,
+                        format_func=lambda v: ma.ROLE_LABELS[v], key=f"an_role_{cut['id']}")
+                    cut["tags"] = r2.multiselect(
+                        "태그", ma.TAGS, default=[t for t in (cut.get("tags") or []) if t in ma.TAGS],
+                        key=f"an_tags_{cut['id']}")
+                    cut["locked"] = r3.checkbox("고정", value=bool(cut.get("locked")),
+                                                key=f"an_lock_{cut['id']}",
+                                                help="자동 재구성에서도 이 자료의 배치/효과를 유지합니다.")
+        if st.button("역할·태그 저장", key="auto_save_roles"):
+            pm.save_project(project)
+            st.success("저장했습니다.")
+
+
+def section_plan(project: dict, brief: dict) -> None:
+    st.subheader("⑤ 장면 계획 (사진 vs AI 영상)")
+    script = project.get("script_data") or {}
+    if not script.get("scenes"):
+        st.info("먼저 대본을 생성하세요.")
+        return
+
+    settings = config.load_settings()["higgsfield"]
+    c1, c2 = st.columns([1, 3])
+    max_clips = c2.slider("AI 영상 최대 개수", 0, 6, int(settings.get("max_clips", 3)), 1,
+                          key="auto_maxclips",
+                          help="실제 사진으로 표현하기 어려운 장면만 AI로 만듭니다. 예산을 넘으면 자동으로 줄어듭니다.")
+    if c1.button("장면 계획 만들기", type="primary", key="auto_plan"):
+        with st.spinner("장면 계획 중..."):
+            plan_items = sp.plan(project, script, max_ai_clips=max_clips)
+        project["scene_plan"] = plan_items
+        _log(project, "scene_plan", bool(plan_items), sp.summary(project, plan_items))
+        pm.save_project(project)
+        st.rerun()
+
+    plan_items = project.get("scene_plan") or []
+    if not plan_items:
+        st.caption("계획 전입니다.")
+        return
+
+    st.success(sp.summary(project, plan_items))
+    budget = hf.budget_state(project)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("예상 크레딧", f"{sp.total_estimated_credits(plan_items):.1f}")
+    c2.metric("이번 달 사용", f"{budget['used']:.1f}")
+    c3.metric("월 예산", "무제한" if budget["monthly_budget"] <= 0 else f"{budget['monthly_budget']:.0f}")
+
+    rows = []
+    for item in plan_items:
+        rows.append({
+            "장면": item["scene_id"],
+            "역할": item["role"],
+            "자막": item["subtitle"].replace("\n", " "),
+            "길이": f"{item['duration']:.2f}s",
+            "화면": {"uploaded_image": "사진", "uploaded_video": "기존 영상",
+                    "higgsfield_video": "AI 영상", "black_screen": "블랙"}.get(item["visual_type"],
+                                                                            item["visual_type"]),
+            "자료": Path(item["media_file"]).name if item["media_file"] else "-",
+            "상태": {
+                "matched": "매칭", "reused": "재사용", "ai_pending": "AI 생성 대기",
+                "ai_ready": "AI 완료", "ai_failed": "AI 실패", "photo_fallback": "사진 대체",
+                "unmatched": "미배정",
+            }.get(item["status"], item["status"]),
+            "크레딧": f"{item['estimated_credits']:.1f}" if item["needs_ai"] else "",
+        })
+    st.dataframe(rows, width="stretch", hide_index=True)
+
+    unused = sp.unused_media(project, plan_items)
+    if unused:
+        st.caption(f"미사용 자료 {len(unused)}개 (삭제되지 않고 타임라인에 '사용 안 함'으로 남습니다): "
+                   + ", ".join(Path(u).name for u in unused[:8]))
+
+    ai_list = sp.ai_items(plan_items)
+    if ai_list:
+        with st.expander(f"AI 영상 프롬프트 {len(ai_list)}개 (직접 수정 가능)", expanded=False):
+            for item in ai_list:
+                st.markdown(f"**{item['scene_id']}** · {item['role']} · 모델 `{item['model']}` · "
+                            f"{item['ai_seconds']}초 · 예상 {item['estimated_credits']:.1f} 크레딧"
+                            + (f" · 참고 이미지 `{Path(item['reference_image']).name}`"
+                               if item.get("reference_image") else ""))
+                item["higgsfield_prompt"] = st.text_area(
+                    "프롬프트", value=item["higgsfield_prompt"], height=110,
+                    key=f"pl_prompt_{item['scene_id']}", label_visibility="collapsed")
+            if st.button("프롬프트 저장", key="auto_save_prompts"):
+                pm.save_project(project)
+                st.success("저장했습니다.")
+        st.info("AI 영상은 실제 생성 전까지 참고 사진이 임시로 배치됩니다. "
+                "생성은 'Higgsfield 영상' 단계에서 승인 후 진행합니다.")
+
+
+def section_draft(project: dict) -> None:
+    st.subheader("⑥ 쇼츠 초안 자동 구성")
+    plan_items = project.get("scene_plan") or []
+    if not plan_items:
+        st.info("먼저 장면 계획을 만드세요.")
+        return
+
+    tts = project.get("tts") or None
+    c1, c2 = st.columns([1, 3])
+    if c1.button("쇼츠 초안 자동 구성", type="primary", key="auto_draft_btn"):
+        count, message = tl.auto_build(project, plan_items, tts)
+        _log(project, "timeline", bool(count), message)
+        pm.save_project(project)
+        (st.success if count else st.warning)(message)
+        if count:
+            st.rerun()
+    c2.caption("첫 컷은 hook, 첫 3초 안에 최소 3컷, 사진/영상 교차, 하드컷 중심으로 배치합니다. "
+               "음성이 있으면 장면별 실제 발화 길이를 컷 길이로 씁니다. "
+               "쓰지 않은 자료는 삭제하지 않고 '사용 안 함'으로 남습니다.")
+
+    if not project.get("cuts"):
+        return
+    stats = tl.stats(project)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("총 길이", f"{stats['duration']:.2f}초")
+    c2.metric("첫 3초 컷", f"{stats['first_window']}컷")
+    c3.metric("사진 / 영상", f"{stats['images']} / {stats['videos']}")
+    c4.metric("미사용", f"{stats['unused']}개")
+    if stats["first_window"] < 3:
+        st.warning("첫 3초 컷이 3개보다 적습니다. 앞쪽 컷 길이를 줄이거나 컷을 추가하세요.")
+    st.caption("세부 조정은 '4. 타임라인' 화면에서 할 수 있습니다.")
+
+
+def _media_summary(project: dict) -> str:
+    if project.get("media_analysis"):
+        return ma.summary_for_prompt(project)
     cuts = project.get("cuts", [])
     if not cuts:
         return "업로드된 자료 없음"
@@ -373,6 +552,12 @@ def page(project: dict, bump) -> None:
     section_material(project, brief, bump)
     st.divider()
     section_script(project, brief)
+    st.divider()
+    section_analysis(project)
+    st.divider()
+    section_plan(project, brief)
+    st.divider()
+    section_draft(project)
 
     project["ai_settings"] = config.sanitize_for_project(config.load_settings())
     pm.save_project(project)

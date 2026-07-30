@@ -64,32 +64,77 @@ def _grade_filter(project: dict) -> str:
     return ("," + ",".join(parts)) if parts else ""
 
 
-def _zoompan_expr(effect: str, frames: int) -> tuple[str, str, str]:
+# 확대 배율 상한 (과도한 화면 잘림 방지)
+ZOOM_SLOW = 0.06         # 1.00 → 1.06
+ZOOM_FAST = 0.12         # 1.00 → 1.12
+ZOOM_PAN = 1.08
+ZOOM_SHAKE = 1.04
+
+
+def focus_ratio(cut: dict | None) -> tuple[float, float]:
+    """컷의 관심 영역을 (x, y) 비율로 반환. 기본은 가운데."""
+    if not cut:
+        return 0.5, 0.5
+    mode = cut.get("focus", "center")
+    presets = {
+        "center": (0.5, 0.5), "top": (0.5, 0.25), "bottom": (0.5, 0.75),
+        "left": (0.25, 0.5), "right": (0.75, 0.5),
+    }
+    if mode in presets:
+        return presets[mode]
+    xy = cut.get("focus_xy") or [0.5, 0.5]
+    try:
+        fx = min(1.0, max(0.0, float(xy[0])))
+        fy = min(1.0, max(0.0, float(xy[1])))
+    except (TypeError, ValueError, IndexError):
+        return 0.5, 0.5
+    return fx, fy
+
+
+def _focus_x(fx: float) -> str:
+    """초점 x 비율 → zoompan x 표현식 (이미지 경계 밖으로 나가지 않게 제한)."""
+    if abs(fx - 0.5) < 0.001:
+        return "(iw-iw/zoom)/2"
+    return f"max(0,min(iw-iw/zoom,{fx:.4f}*iw-iw/zoom/2))"
+
+
+def _focus_y(fy: float) -> str:
+    if abs(fy - 0.5) < 0.001:
+        return "(ih-ih/zoom)/2"
+    return f"max(0,min(ih-ih/zoom,{fy:.4f}*ih-ih/zoom/2))"
+
+
+def _zoompan_expr(effect: str, frames: int, focus: tuple[float, float] = (0.5, 0.5)) -> tuple[str, str, str]:
     """(z, x, y) 표현식. iw/ih 는 업스케일된 소스 크기."""
     last = max(1, frames - 1)
     base = SRC_SCALE
-    center_x = "(iw-iw/zoom)/2"
-    center_y = "(ih-ih/zoom)/2"
+    fx, fy = focus
+    focus_x = _focus_x(fx)
+    focus_y = _focus_y(fy)
 
     if effect == "slow_zoom_in":
-        return f"{base:.4f}+0.15*on/{last}", center_x, center_y
+        return f"{base:.4f}+{base * ZOOM_SLOW:.4f}*on/{last}", focus_x, focus_y
     if effect == "fast_zoom_in":
-        return f"{base:.4f}+0.35*on/{last}", center_x, center_y
+        return f"{base:.4f}+{base * ZOOM_FAST:.4f}*on/{last}", focus_x, focus_y
+    if effect == "slow_zoom_out":
+        start = base * (1 + ZOOM_SLOW)
+        return f"{start:.4f}-{base * ZOOM_SLOW:.4f}*on/{last}", focus_x, focus_y
     if effect == "pan_left_to_right":
-        z = base * 1.08
-        return f"{z:.4f}", f"(iw-iw/zoom)*on/{last}", center_y
+        z = base * ZOOM_PAN
+        return f"{z:.4f}", f"(iw-iw/zoom)*on/{last}", focus_y
     if effect == "pan_right_to_left":
-        z = base * 1.08
-        return f"{z:.4f}", f"(iw-iw/zoom)*(1-on/{last})", center_y
+        z = base * ZOOM_PAN
+        return f"{z:.4f}", f"(iw-iw/zoom)*(1-on/{last})", focus_y
     if effect == "subtle_shake":
-        z = base * 1.04
-        return f"{z:.4f}", f"{center_x}+10*sin(on/2.5)", f"{center_y}+8*cos(on/3.5)"
-    return f"{base:.4f}", center_x, center_y
+        z = base * ZOOM_SHAKE
+        return f"{z:.4f}", f"{focus_x}+10*sin(on/2.5)", f"{focus_y}+8*cos(on/3.5)"
+    return f"{base:.4f}", focus_x, focus_y
 
 
-def build_image_filter(project: dict, effect: str, frames: int, width: int, height: int, fps: int) -> str:
+def build_image_filter(project: dict, effect: str, frames: int, width: int, height: int, fps: int,
+                       cut: dict | None = None) -> str:
     src_w, src_h = _even(width * SRC_SCALE), _even(height * SRC_SCALE)
-    z, x, y = _zoompan_expr(effect, frames)
+    z, x, y = _zoompan_expr(effect, frames, focus_ratio(cut))
     return (
         f"scale={src_w}:{src_h}:force_original_aspect_ratio=increase,"
         f"crop={src_w}:{src_h},setsar=1,"
@@ -99,12 +144,23 @@ def build_image_filter(project: dict, effect: str, frames: int, width: int, heig
     )
 
 
-def build_video_filter(project: dict, frames: int, width: int, height: int, fps: int) -> str:
+def _crop_expr(width: int, height: int, focus: tuple[float, float]) -> str:
+    """관심 영역 기준 crop. 가운데(0.5, 0.5)면 기존과 동일하게 동작한다."""
+    fx, fy = focus
+    if abs(fx - 0.5) < 0.001 and abs(fy - 0.5) < 0.001:
+        return f"crop={width}:{height}"
+    x = f"max(0,min(iw-ow,{fx:.4f}*iw-ow/2))"
+    y = f"max(0,min(ih-oh,{fy:.4f}*ih-oh/2))"
+    return f"crop=w={width}:h={height}:x='{x}':y='{y}'"
+
+
+def build_video_filter(project: dict, frames: int, width: int, height: int, fps: int,
+                       cut: dict | None = None) -> str:
     hold = frames / fps + 1.0
     return (
         f"setpts=PTS-STARTPTS,fps={fps},"
         f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-        f"crop={width}:{height},setsar=1,"
+        f"{_crop_expr(width, height, focus_ratio(cut))},setsar=1,"
         f"tpad=stop_mode=clone:stop_duration={hold:.3f},"
         f"trim=start_frame=0:end_frame={frames},setpts=PTS-STARTPTS"
         f"{_grade_filter(project)},format=yuv420p"
@@ -226,7 +282,8 @@ def render(
                 report(0.55 * (_b + _s * f), f"컷 {_i + 1}/{len(plan)} 렌더링 중")
 
             if cut.get("type") == "image":
-                vf = build_image_filter(project, cut.get("effect", "none"), item["frames"], width, height, fps)
+                vf = build_image_filter(project, cut.get("effect", "none"), item["frames"],
+                                        width, height, fps, cut)
                 args = [
                     "-loop", "1", "-framerate", str(fps), "-t", f"{duration + 0.5:.3f}",
                     "-i", str(item["path"]), "-vf", vf, *_encode_args(fps, seg_crf, seg_preset), name,
@@ -242,7 +299,7 @@ def render(
                         f"{cut.get('name') or cut['file']}\n"
                         "손상되었거나 지원하지 않는 파일일 수 있습니다.",
                     )
-                vf = build_video_filter(project, item["frames"], width, height, fps)
+                vf = build_video_filter(project, item["frames"], width, height, fps, cut)
                 args = ["-i", str(item["path"]), "-vf", vf, *_encode_args(fps, seg_crf, seg_preset), name]
 
             report(0.55 * base, f"컷 {i + 1}/{len(plan)} 렌더링 중")

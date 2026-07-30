@@ -111,14 +111,32 @@ def main() -> int:
                    "사실성 점검", "금지 표현 점검", "장면 저장"):
         check(f"버튼 존재: {needed}", any(needed in label for label in labels))
 
-    at = run_page("0. AI 자동 제작", project)
-    target = next((b for b in at.button if "사실성 점검" in b.label), None)
-    if target is not None:
+    # 실제 클릭까지 동작하는지 (버튼이 껍데기가 아닌지) 확인
+    for label in ("사실성 점검", "자료 분석 실행", "장면 계획 만들기", "쇼츠 초안 자동 구성"):
+        at = run_page("0. AI 자동 제작", project)
+        target = next((b for b in at.button if label in b.label), None)
+        if target is None:
+            check(f"버튼 클릭 동작: {label}", False, "버튼 없음")
+            continue
         after = target.click().run()
-        check("사실성 점검 버튼 동작", not after.exception,
-              "; ".join(str(e.value) for e in after.exception)[:300])
+        errors = "; ".join(str(e.value) for e in after.exception)
+        check(f"버튼 클릭 동작: {label}", not after.exception, errors[:300])
+
+    check("분석 결과 저장됨", bool(project.get("media_analysis")),
+          f"{len(project.get('media_analysis') or {})}개")
+    check("장면 계획 저장됨", bool(project.get("scene_plan")),
+          f"{len(project.get('scene_plan') or [])}개")
+
+    # 타임라인 화면: 계획이 있는 상태에서 초안 구성 버튼 동작
+    at = run_page("4. 타임라인", project)
+    check("타임라인 상단 요약 표시", len(at.metric) >= 5, f"{len(at.metric)}개")
+    target = next((b for b in at.button if "쇼츠 초안 자동 구성" in b.label), None)
+    if target is None:
+        check("타임라인 초안 구성 버튼", False, "버튼 없음")
     else:
-        check("사실성 점검 버튼 동작", False, "버튼 없음")
+        after = target.click().run()
+        check("타임라인 초안 구성 버튼", not after.exception,
+              "; ".join(str(e.value) for e in after.exception)[:300])
 
     print()
     if failures:
