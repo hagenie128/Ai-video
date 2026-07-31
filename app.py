@@ -16,6 +16,7 @@ import ui_ai_settings
 import ui_auto
 import ui_review
 from audio import describe as audio_describe
+from media_manager import add_media_files
 from renderer import RenderError
 from subtitles import split_script
 from utils import (
@@ -303,34 +304,6 @@ def page_script(p: dict) -> None:
 
 
 # ---------------------------------------------------------------- 3. 미디어 업로드
-
-def add_media_files(p: dict, files, kind: str) -> int:
-    """미디어 업로드 → 컷 등록. '0. AI 자동 제작' 화면도 이 함수를 쓴다."""
-    added = 0
-    category = "images" if kind == "image" else "videos"
-    for f in files:
-        rel = pm.save_upload(p, category, f.name, f.getvalue())
-        path = pm.abs_path(p, rel)
-        duration, source = 2.0, 0.0
-        effect = "none"
-        if kind == "image":
-            rules = p.get("cut_rules", {})
-            duration = float(rules.get("normal", 2.0))
-            preset = pm.load_preset(p.get("preset", "dark_warning"))
-            effect = preset.get("default_image_effect", "slow_zoom_in")
-        else:
-            try:
-                info = media_info(path)
-                source = round(info["duration"], 2)
-                duration = min(max(source, 0.5), 2.5) if source else 2.0
-            except Exception:  # noqa: BLE001
-                source, duration = 0.0, 2.0
-        cut = pm.new_cut(kind, rel, f.name, duration, effect)
-        cut["source_duration"] = source
-        p["cuts"].append(cut)
-        added += 1
-    return added
-
 
 def page_media(p: dict) -> None:
     st.header("3. 미디어 업로드")
@@ -818,4 +791,5 @@ def main() -> None:
     autosave()
 
 
-main()
+if __name__ == "__main__":
+    main()

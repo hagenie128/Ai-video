@@ -513,3 +513,21 @@ python tests/smoke_app.py               Streamlit 서버 기동 확인
 
 테스트용 더미 사진/영상/음성은 `tests/make_fixtures.py`가 FFmpeg와 Pillow로 만듭니다.
 `temp/`, `projects/`, `outputs/` 안에만 파일을 만들며 실제 작업 데이터는 건드리지 않습니다.
+
+---
+
+## 15. 코드 구조 주의사항
+
+**화면 모듈(`ui_*.py`)은 `app.py`를 import 하지 않습니다.**
+
+Streamlit은 `app.py`를 `__main__`으로 실행합니다. 여기서 `from app import ...` 를 하면
+파이썬이 `app`이라는 **별개 모듈을 새로 만들어 다시 실행**하고, 그 과정에서 `main()`이 한 번 더
+호출되어 사이드바 위젯이 두 번 생성됩니다 → `StreamlitDuplicateElementKey: key='pick_project'`.
+
+그래서 공용 함수는 화면과 무관한 모듈에 둡니다.
+
+- `add_media_files()` → `media_manager.py` (app.py와 ui_auto.py가 각각 import)
+- `app.py` 최하단은 `if __name__ == "__main__": main()` 으로 감쌉니다.
+
+`tests/test_no_reentry.py`가 이 규칙을 검사합니다. 새 화면 모듈을 추가할 때 이 테스트의
+`UI_MODULES` 목록에도 파일명을 넣어 주세요.

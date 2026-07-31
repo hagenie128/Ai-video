@@ -14,6 +14,7 @@ import automation_pipeline as ap
 import config
 import higgsfield_service as hf
 import media_analyzer as ma
+import media_manager
 import project_manager as pm
 import renderer
 import scene_planner as sp
@@ -190,8 +191,7 @@ def section_material(project: dict, brief: dict, bump) -> None:
 
 def _register_media(project: dict, files, kind: str) -> int:
     """미디어 업로드 → 컷 등록. 기존 '3. 미디어 업로드' 와 같은 규칙을 쓴다."""
-    from app import add_media_files
-    return add_media_files(project, files, kind)
+    return media_manager.add_media_files(project, files, kind)
 
 
 # ---------------------------------------------------------------- 대본
