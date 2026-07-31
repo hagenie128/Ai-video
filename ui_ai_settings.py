@@ -196,9 +196,58 @@ def page(project: dict | None = None) -> None:
         if not env["cli"]:
             st.warning("CLI 가 없습니다. 아래 명령으로 설치하세요. 설치 없이도 '수동 업로드'로 진행할 수 있습니다.")
             st.code("npm i -g @higgsfield/cli", language="text")
-        if env["cli"] and env["auth"] != "yes":
-            st.warning("로그인이 필요합니다. 아래 명령을 터미널에서 실행하세요 (브라우저 인증).")
-            st.code("higgsfield auth login", language="text")
+        if env["cli"]:
+            st.divider()
+            st.subheader("로그인")
+            c1, c2 = st.columns([1, 3])
+            if env["auth"] == "yes":
+                c2.success("로그인되어 있습니다.")
+                if c1.button("로그아웃", key="hf_logout", width="stretch"):
+                    ok, message = hf.logout()
+                    (st.success if ok else st.error)(message)
+                    st.rerun()
+            else:
+                if c1.button("브라우저로 로그인", type="primary", key="hf_login", width="stretch"):
+                    box = st.empty()
+                    lines: list[str] = []
+
+                    def on_line(text: str, _box=box, _lines=lines) -> None:
+                        _lines.append(text)
+                        _box.code("\n".join(_lines[-10:]), language="text")
+
+                    with st.spinner("브라우저에서 인증을 완료하세요... (최대 5분 대기)"):
+                        ok, message = hf.login(on_line=on_line)
+                    box.empty()
+                    (st.success if ok else st.error)(message)
+                    if ok:
+                        st.rerun()
+                c2.caption("이 앱은 사용자 PC 에서 실행되므로 버튼을 누르면 브라우저가 열립니다. "
+                           "창이 안 열리면 로그에 표시되는 주소를 직접 여세요. "
+                           f"터미널에서 직접 하려면: `{hf.LOGIN_COMMAND}`")
+
+            st.subheader("워크스페이스")
+            current_ws = hf.workspace_status()
+            if current_ws:
+                st.caption(f"현재: {current_ws}")
+            c1, c2 = st.columns([1, 3])
+            if c1.button("워크스페이스 조회", key="hf_ws_list", width="stretch"):
+                st.session_state["_hf_ws"] = hf.list_workspaces()
+            data = st.session_state.get("_hf_ws")
+            if data:
+                ok, items, message = data
+                if not ok:
+                    c2.warning(message)
+                elif items:
+                    labels = {ws_id: f"{name or '(이름 없음)'} · {ws_id[:8]}…" for ws_id, name in items}
+                    picked = c2.selectbox("워크스페이스 선택", [i[0] for i in items],
+                                          format_func=lambda v: labels.get(v, v), key="hf_ws_pick")
+                    if c2.button("이 워크스페이스로 설정", key="hf_ws_set"):
+                        ok, message = hf.set_workspace(picked)
+                        (st.success if ok else st.error)(message)
+                        if ok:
+                            st.rerun()
+            else:
+                c2.caption("`No workspace selected` 오류가 나면 여기서 조회한 뒤 선택하세요.")
 
         if env["cli"]:
             surf = hf.surface()

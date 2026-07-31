@@ -122,11 +122,18 @@ def run(
     on_line: Callable[[str], None] | None = None,
     cancel: threading.Event | None = None,
     log_command: bool = True,
+    interactive: bool = False,
 ) -> RunResult:
-    """CLI 실행. shell 을 쓰지 않고 stdout/stderr 를 실시간으로 캡처한다."""
+    """CLI 실행. shell 을 쓰지 않고 stdout/stderr 를 실시간으로 캡처한다.
+
+    interactive=True 는 로그인처럼 브라우저를 열어야 하는 명령에 쓴다 (CI 모드 해제).
+    """
     env = dict(os.environ)
     env.setdefault("NO_COLOR", "1")
-    env.setdefault("CI", "1")               # 대화형 프롬프트 억제
+    if not interactive:
+        env.setdefault("CI", "1")           # 대화형 프롬프트 억제
+    else:
+        env.pop("CI", None)
     try:
         proc = subprocess.Popen(
             args, cwd=str(cwd) if cwd else None,
@@ -433,6 +440,121 @@ def full_help_report() -> str:
         parts.append(f"$ higgsfield {sub or ''} --help\n{help_text(sub)}")
         parts.append("-" * 60)
     return "\n".join(parts)
+
+
+# ---------------------------------------------------------------- 로그인 / 워크스페이스
+
+def login(timeout: float = 300, on_line: Callable[[str], None] | None = None) -> tuple[bool, str]:
+    """`higgsfield auth login` 실행. CLI 가 기본 브라우저를 열어 OAuth 인증을 진행한다.
+
+    앱이 사용자 PC 에서 돌기 때문에 브라우저도 사용자 PC 에서 열린다.
+    """
+    surf = surface()
+    if not surf.root:
+        return False, f"CLI 가 없습니다. 설치: {INSTALL_COMMAND}"
+    if "login" not in surf.auth:
+        return False, "이 CLI 버전에는 auth login 명령이 없습니다."
+
+    result = run([*surf.root, "auth", "login"], timeout=timeout, on_line=on_line, interactive=True)
+    _reset_caches()
+    if result.timed_out:
+        return False, ("로그인 대기 시간이 지났습니다. 브라우저 창이 열렸는지 확인하고 다시 시도하세요.\n"
+                       f"터미널에서 직접 실행해도 됩니다: {LOGIN_COMMAND}")
+    status = environment_status(force=True)
+    if status["auth"] == "yes":
+        return True, "로그인되었습니다."
+    guidance = _cli_guidance(result.output)
+    return False, (guidance or "로그인을 확인하지 못했습니다.") + f"\n직접 실행: {LOGIN_COMMAND}"
+
+
+def logout() -> tuple[bool, str]:
+    surf = surface()
+    if not surf.root or "logout" not in surf.auth:
+        return False, "logout 명령을 쓸 수 없습니다."
+    result = run([*surf.root, "auth", "logout"], timeout=60)
+    _reset_caches()
+    return result.ok, "로그아웃했습니다." if result.ok else result.output.strip()[:200]
+
+
+def _workspace_commands() -> list[str]:
+    surf = surface()
+    if not surf.root or "workspace" not in surf.top:
+        return []
+    help_output = run([*surf.root, "workspace", "--help"], timeout=60).output
+    return _parse_commands(help_output)
+
+
+def list_workspaces() -> tuple[bool, list[tuple[str, str]], str]:
+    """(성공, [(workspace_id, 이름)], 메시지)"""
+    surf = surface()
+    subs = _workspace_commands()
+    if not surf.root or "list" not in subs:
+        return False, [], "이 CLI 버전은 워크스페이스 목록 조회를 제공하지 않습니다."
+    args = [*surf.root, "workspace", "list"]
+    if surf.json_flag:
+        args.append("--json")
+    result = run(args, timeout=120)
+    if not result.ok or result.failed_message:
+        if _NOT_AUTH_RE.search(result.output):
+            return False, [], f"먼저 로그인하세요: {LOGIN_COMMAND}"
+        return False, [], f"조회 실패: {result.output.strip()[:200]}"
+    items = _parse_workspaces(result.stdout or result.output)
+    if not items:
+        return False, [], f"목록을 해석하지 못했습니다.\n{result.output[:300]}"
+    return True, items, f"워크스페이스 {len(items)}개를 찾았습니다."
+
+
+def _parse_workspaces(text: str) -> list[tuple[str, str]]:
+    try:
+        data = json.loads(text)
+        rows = data if isinstance(data, list) else (
+            data.get("workspaces") or data.get("data") or data.get("items") or [])
+        result: list[tuple[str, str]] = []
+        for row in rows:
+            if isinstance(row, dict):
+                ws_id = row.get("id") or row.get("workspace_id") or row.get("uuid")
+                name = row.get("name") or row.get("title") or row.get("slug") or ""
+                if ws_id:
+                    result.append((str(ws_id), str(name)))
+        if result:
+            return result
+    except (json.JSONDecodeError, TypeError, AttributeError):
+        pass
+
+    result = []
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line.lower().startswith(("usage", "error", "hint", "id ", "name")):
+            continue
+        m = re.match(r"^([0-9a-f]{8}-[0-9a-f-]{20,}|[A-Za-z0-9_-]{6,})\s+(.*)$", line)
+        if m:
+            result.append((m.group(1), m.group(2).strip()))
+    return result
+
+
+def workspace_status() -> str:
+    surf = surface()
+    subs = _workspace_commands()
+    if not surf.root or "status" not in subs:
+        return ""
+    result = run([*surf.root, "workspace", "status"], timeout=60)
+    if not result.ok or result.failed_message:
+        return ""
+    return " ".join(result.output.split())[:200]
+
+
+def set_workspace(workspace_id: str) -> tuple[bool, str]:
+    surf = surface()
+    subs = _workspace_commands()
+    if not surf.root or "set" not in subs:
+        return False, "이 CLI 버전은 워크스페이스 선택을 제공하지 않습니다."
+    if not workspace_id.strip():
+        return False, "워크스페이스 ID 가 비어 있습니다."
+    result = run([*surf.root, "workspace", "set", workspace_id.strip()], timeout=90)
+    _reset_caches()
+    if result.ok and not result.failed_message:
+        return True, f"워크스페이스를 선택했습니다: {workspace_id}"
+    return False, (_cli_guidance(result.output) or result.output.strip()[:200])
 
 
 # ---------------------------------------------------------------- 계정 / 크레딧
