@@ -128,12 +128,38 @@ def section(project: dict) -> None:
         st.divider()
         st.warning(f"AI 영상이 아직 없는 장면 {len(pending)}개가 있습니다. "
                    "수동 업로드로 채우거나, 실제 사진으로 대체할 수 있습니다.")
-        if st.button("남은 장면을 실제 사진으로 대체", key="hf_fallback_all"):
+        c1, c2 = st.columns(2)
+        if c1.button("남은 장면을 실제 사진으로 대체", key="hf_fallback_all", type="primary",
+                     width="stretch"):
             changed = sp.fallback_ai_to_photo(project, plan_items)
             _log(project, "higgsfield_fallback", True, f"{changed}개 장면 사진 대체")
             pm.save_project(project)
             st.success(f"{changed}개 장면을 사진으로 대체했습니다. '쇼츠 초안 자동 구성'을 다시 실행하세요.")
             st.rerun()
+        exhausted_items = [i for i in pending
+                           if int(i.get("attempts", 0)) >= int(
+                               config.load_settings()["higgsfield"].get("max_attempts", 2))]
+        if exhausted_items and c2.button(
+                f"시도 횟수 초기화 ({len(exhausted_items)}개 장면)", key="hf_reset_all",
+                width="stretch", help="로그인·설치·예산 등 실패 원인을 고친 뒤에 쓰세요."):
+            for entry in exhausted_items:
+                entry["attempts"] = 0
+                entry["status"] = "ai_pending"
+            _log(project, "higgsfield_reset", True, f"{len(exhausted_items)}개 장면 시도 횟수 초기화")
+            pm.save_project(project)
+            st.rerun()
+
+
+def _last_failure(project: dict, scene_id: str) -> str:
+    """이 장면의 마지막 실패 사유 (생성 기록에서 찾는다)."""
+    for record in reversed(project.get("higgsfield_generations") or []):
+        if record.get("scene_id") != scene_id:
+            continue
+        if record.get("status") == "success":
+            return ""
+        message = str(record.get("message") or "").strip()
+        return " ".join(message.split())[:300] if message else "사유가 기록되지 않았습니다."
+    return ""
 
 
 def _scene_card(project: dict, plan_items: list[dict], item: dict, can_auto: bool, env: dict) -> None:
@@ -169,13 +195,26 @@ def _scene_card(project: dict, plan_items: list[dict], item: dict, can_auto: boo
                     st.video(str(path))
                 st.success(f"생성 완료: `{item['media_file']}`")
 
+            # 왜 실패했는지 보여준다 (기록이 있으면 마지막 실패 사유)
+            reason = _last_failure(project, scene_id)
+            if reason and status != "ai_ready":
+                st.error(f"마지막 실패 사유 — {reason}")
+
+            exhausted = attempts >= max_attempts and status != "ai_ready"
+            if exhausted:
+                st.warning(
+                    f"최대 시도 횟수({max_attempts}회)에 도달했습니다. 아래 중 하나를 고르세요.\n\n"
+                    "· **수동 업로드** — Higgsfield 웹/MCP 로 만든 영상을 올립니다 (가장 확실)\n"
+                    "· **사진으로 대체** — 이 장면을 실제 사진으로 채웁니다 (한 번에 끝)\n"
+                    "· **시도 횟수 초기화** — 실패 원인(로그인·설치·예산 등)을 고쳤을 때만"
+                )
+
             c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 2.4])
             if can_auto:
                 label = "승인 후 생성" if status != "ai_ready" else "재생성"
-                disabled = attempts >= max_attempts and status != "ai_ready"
-                if c1.button(label, key=f"hfg_{scene_id}", type="primary", disabled=disabled):
+                if c1.button(label, key=f"hfg_{scene_id}", type="primary", disabled=exhausted):
                     _generate_batch(project, plan_items, [item], force_scene=scene_id)
-                if disabled:
+                if exhausted:
                     c1.caption(f"최대 시도({max_attempts}회) 도달")
                 if c2.button("실제 견적 조회", key=f"hfc_{scene_id}"):
                     request = _build_request(project, item)
@@ -196,6 +235,15 @@ def _scene_card(project: dict, plan_items: list[dict], item: dict, can_auto: boo
                 pm.save_project(project)
                 st.info(f"{changed}개 장면을 사진으로 대체했습니다.")
                 st.rerun()
+
+            if exhausted and can_auto:
+                if c2.button("시도 횟수 초기화", key=f"hfz_{scene_id}"):
+                    item["attempts"] = 0
+                    item["status"] = "ai_pending"
+                    _log(project, "higgsfield_reset", True, f"{scene_id} 시도 횟수 초기화")
+                    pm.save_project(project)
+                    st.rerun()
+                c2.caption("이미 쓴 크레딧은 돌아오지 않습니다.")
 
             with st.expander("수동 업로드 (Plan B)", expanded=not can_auto and status != "ai_ready"):
                 st.code(item.get("higgsfield_prompt", ""), language="text")
